@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dubble Bubbles</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="menu">
+        <h1>Dubble Menu</h1>
+        <button onclick="blowNewBubble()">Blow New Bubble</button>
+        <button onclick="showDoubleBubbleModal()">Double a Bubble</button>
+        <!-- button onclick="showAccounts()">Show Accounts</button -->
+        <button onclick="showCombineAccountsModal()">Combine Accounts</button>
+        <button onclick="logout()">Logout</button>
+    </div>
+    <div class="accounts" id="accounts"></div>
+
+    <!-- Double Bubble Modal -->
+    <div id="doubleBubbleModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('doubleBubbleModal')">&times;</span>
+            <h2>Double a Bubble</h2>
+            <label for="accountNumber">Enter Account ID:</label>
+            <input type="number" id="accountNumber" required>
+            <button onclick="doubleBubbleFromModal()">Double</button>
+        </div>
+    </div>
+
+    <!-- Combine Accounts Modal -->
+    <div id="combineAccountsModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('combineAccountsModal')">&times;</span>
+            <h2>Combine Accounts</h2>
+            <label for="accountNumber1">Enter First Account ID:</label>
+            <input type="number" id="accountNumber1" required>
+            <label for="accountNumber2">Enter Second Account ID:</label>
+            <input type="number" id="accountNumber2" required>
+            <button onclick="combineAccounts()">Combine</button>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
