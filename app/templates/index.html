@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Dubble{% endblock %}
+{% block content %}
+<div class="app">
+    <header class="menu">
+        <h1>Dubble</h1>
+        <div class="menu-actions">
+            <button id="btn-blow" class="btn btn-primary">Blow Bubble</button>
+            <a href="{{ url_for('auth.logout') }}" class="btn btn-secondary">Logout</a>
+        </div>
+    </header>
+
+    <div class="wallet-info">
+        <span class="wallet-label">Total:</span>
+        <span id="wallet-balance" class="wallet-balance">-- sats</span>
+        <span id="wallet-usd" class="wallet-usd">--</span>
+        <span class="btc-price">BTC: $<span id="btc-price">{{ "{:,.0f}".format(btc_usd) }}</span></span>
+    </div>
+
+    <div id="bubbles" class="bubble-field"></div>
+</div>
+
+<!-- Invoice Modal -->
+<div id="invoice-modal" class="modal" style="display:none">
+    <div class="modal-content">
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+        <h2 id="modal-title">Pay this invoice</h2>
+        <div id="modal-amount" class="modal-amount"></div>
+        <div id="modal-qr" class="modal-qr"></div>
+        <div id="modal-invoice" class="modal-invoice"></div>
+        <button id="modal-copy" class="btn btn-secondary" onclick="copyInvoice()">Copy Invoice</button>
+        <button id="modal-check" class="btn btn-primary" onclick="checkPayment()">I've Paid</button>
+    </div>
+</div>
+
+<!-- Edit Bubble Modal -->
+<div id="edit-modal" class="modal" style="display:none">
+    <div class="modal-content">
+        <button class="modal-close" onclick="closeEditModal()">&times;</button>
+        <h2>Edit Bubble</h2>
+        <label for="bubble-name">Name</label>
+        <input type="text" id="bubble-name" placeholder="e.g. Vacation fund">
+        <input type="hidden" id="edit-bubble-id">
+        <div class="modal-actions">
+            <button class="btn btn-primary" onclick="saveBubbleName()">Save</button>
+            <button class="btn btn-danger" onclick="popBubble()">Pop (withdraw all first)</button>
+        </div>
+    </div>
+</div>
+
+<!-- Withdraw Modal -->
+<div id="withdraw-modal" class="modal" style="display:none">
+    <div class="modal-content">
+        <button class="modal-close" onclick="closeWithdrawModal()">&times;</button>
+        <h2>Withdraw from Bubble</h2>
+        <p id="withdraw-info"></p>
+        <label for="withdraw-invoice">Paste Lightning Invoice</label>
+        <textarea id="withdraw-invoice" rows="3" placeholder="lnbc..."></textarea>
+        <input type="hidden" id="withdraw-bubble-id">
+        <button class="btn btn-primary" onclick="confirmWithdraw()">Send</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    window.BTC_USD = {{ btc_usd }};
+</script>
+<script src="{{ url_for('static', filename='qrcode.min.js') }}"></script>
+<script src="{{ url_for('static', filename='bubble.js') }}"></script>
+{% endblock %}
