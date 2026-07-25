@@ -2,14 +2,32 @@ import os
 import asyncio
 import hashlib
 import logging
-from threading import Lock
+import threading
 from flask import current_app
 
 logger = logging.getLogger(__name__)
 
 _server_salt = b'dubble-kdf-salt-v1'
 _sdk_instances = {}
-_lock = Lock()
+_lock = threading.Lock()
+_loop = None
+_loop_thread = None
+
+
+def _get_event_loop():
+    global _loop, _loop_thread
+    if _loop is not None and _loop.is_running():
+        return _loop
+    _loop = asyncio.new_event_loop()
+    _loop_thread = threading.Thread(target=_loop.run_forever, daemon=True)
+    _loop_thread.start()
+    return _loop
+
+
+def _run(coro):
+    loop = _get_event_loop()
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    return future.result(timeout=30)
 
 
 def derive_mnemonic(username: str, password: str) -> str:
@@ -41,7 +59,7 @@ def _connect_sdk(mnemonic: str, storage_dir: str):
     os.makedirs(storage_dir, exist_ok=True)
 
     request = ConnectRequest(config=config, seed=seed, storage_dir=storage_dir)
-    return asyncio.run(connect(request))
+    return _run(connect(request))
 
 
 def get_sdk(user_id: int, mnemonic: str = None, storage_dir: str = None):
@@ -68,7 +86,7 @@ def disconnect_user(user_id: int):
         sdk = _sdk_instances.pop(user_id, None)
     if sdk:
         try:
-            asyncio.run(sdk.disconnect())
+            _run(sdk.disconnect())
         except Exception:
             pass
 
@@ -91,7 +109,7 @@ def generate_invoice(user_id: int, amount_sats: int, memo: str = '') -> dict:
     from breez_sdk_spark import ReceivePaymentRequest, ReceivePaymentMethod
 
     try:
-        response = asyncio.run(sdk.receive_payment(
+        response = _run(sdk.receive_payment(
             request=ReceivePaymentRequest(
                 payment_method=ReceivePaymentMethod.BOLT11_INVOICE(
                     description=memo or f'Dubble: {amount_sats} sats',
@@ -124,7 +142,7 @@ def check_received_payment(user_id: int, payment_request: str) -> dict:
     from breez_sdk_spark import ListPaymentsRequest
 
     try:
-        response = asyncio.run(sdk.list_payments(
+        response = _run(sdk.list_payments(
             request=ListPaymentsRequest()
         ))
         for payment in response.payments:
@@ -144,13 +162,13 @@ def pay_invoice(user_id: int, payment_request: str) -> dict:
     from breez_sdk_spark import PrepareSendPaymentRequest, SendPaymentRequest
 
     try:
-        prepare = asyncio.run(sdk.prepare_send_payment(
+        prepare = _run(sdk.prepare_send_payment(
             request=PrepareSendPaymentRequest(
                 payment_request=payment_request,
                 amount=None,
             )
         ))
-        response = asyncio.run(sdk.send_payment(
+        response = _run(sdk.send_payment(
             request=SendPaymentRequest(prepare_response=prepare)
         ))
         return {'mock': False, 'success': True, 'payment': response}
@@ -167,7 +185,7 @@ def get_balance(user_id: int) -> dict:
     from breez_sdk_spark import GetInfoRequest
 
     try:
-        info = asyncio.run(sdk.get_info(request=GetInfoRequest(ensure_synced=False)))
+        info = _run(sdk.get_info(request=GetInfoRequest(ensure_synced=False)))
         return {
             'mock': False,
             'balance_sats': info.balance_sats,
@@ -185,7 +203,7 @@ def list_payments(user_id: int) -> dict:
     from breez_sdk_spark import ListPaymentsRequest
 
     try:
-        response = asyncio.run(sdk.list_payments(request=ListPaymentsRequest()))
+        response = _run(sdk.list_payments(request=ListPaymentsRequest()))
         return {'mock': False, 'payments': response.payments}
     except Exception as e:
         logger.error('list_payments failed for user %s: %s', user_id, e)

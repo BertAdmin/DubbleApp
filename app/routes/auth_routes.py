@@ -1,5 +1,5 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app
-from flask_login import login_user, logout_user, login_required
+from flask import Blueprint, render_template, redirect, url_for, flash, request
+from flask_login import login_user, logout_user, login_required, current_user
 from app.auth import register_user, authenticate_user, LoginUser
 from app.lightning import derive_mnemonic, get_sdk, disconnect_user
 from app.models import User, Wallet
@@ -33,11 +33,11 @@ def login():
             mnemonic = derive_mnemonic(username, password)
             wallet = Wallet.query.filter_by(user_id=user.id).first()
             if wallet:
-                storage_dir = wallet.storage_dir or f'Dubble/data/wallets/{user.id}'
-                wallet.storage_dir = storage_dir
-                from app.models import db
-                db.session.commit()
-                get_sdk(user.id, mnemonic=mnemonic, storage_dir=storage_dir)
+                if not wallet.storage_dir:
+                    wallet.storage_dir = f'data/wallets/{user.id}'
+                    from app.models import db
+                    db.session.commit()
+                get_sdk(user.id, mnemonic=mnemonic, storage_dir=wallet.storage_dir)
 
             next_page = request.args.get('next')
             return redirect(next_page or url_for('main.index'))
@@ -49,7 +49,6 @@ def login():
 @auth_bp.route('/logout')
 @login_required
 def logout():
-    from flask_login import current_user
     disconnect_user(current_user.id)
     logout_user()
     return redirect(url_for('auth.login'))

@@ -38,7 +38,10 @@ def register_user(username: str, password: str) -> tuple[bool, str]:
     db.session.flush()
 
     from app.models import Wallet
-    wallet = Wallet(user_id=user.id)
+    wallet = Wallet(
+        user_id=user.id,
+        storage_dir=f'data/wallets/{user.id}'
+    )
     db.session.add(wallet)
     db.session.commit()
 
