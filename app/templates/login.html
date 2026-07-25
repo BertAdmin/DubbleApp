@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Login — Dubble{% endblock %}
+{% block content %}
+<div class="auth-container">
+    <h1>Dubble</h1>
+    <p class="subtitle">savings in bubbles</p>
+    <form method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" required autocomplete="username">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required autocomplete="current-password">
+        <button type="submit">Login</button>
+    </form>
+    <p class="auth-link">Don't have an account? <a href="{{ url_for('auth.register') }}">Register</a></p>
+</div>
+{% endblock %}
