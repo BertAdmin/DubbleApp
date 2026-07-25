@@ -13,7 +13,9 @@ def blow_bubble(user_id: int) -> dict:
     sats_per_dollar = 100_000_000 / price if price else 100_000_000
     initial_sats = max(1, int(sats_per_dollar * 0.01))
 
-    inv = generate_invoice(initial_sats, memo=f'Dubble: blow bubble ({initial_sats} sats)')
+    inv = generate_invoice(user_id, initial_sats, memo=f'Dubble: blow bubble ({initial_sats} sats)')
+    if 'error' in inv:
+        return inv
 
     bubble = Bubble(user_id=user_id, balance_sats=0, balance_usd=0.0)
     db.session.add(bubble)
@@ -37,6 +39,7 @@ def blow_bubble(user_id: int) -> dict:
         'payment_hash': inv['payment_hash'],
         'amount_sats': initial_sats,
         'amount_usd': 0.01,
+        'mock': inv.get('mock', False),
     }
 
 
@@ -49,7 +52,9 @@ def double_bubble(user_id: int, bubble_id: int) -> dict:
     if double_sats < 1:
         return {'error': 'Bubble is empty — blow it first'}
 
-    inv = generate_invoice(double_sats, memo=f'Dubble: double bubble #{bubble_id}')
+    inv = generate_invoice(user_id, double_sats, memo=f'Dubble: double bubble #{bubble_id}')
+    if 'error' in inv:
+        return inv
 
     invoice = Invoice(
         bubble_id=bubble.id,
@@ -69,6 +74,7 @@ def double_bubble(user_id: int, bubble_id: int) -> dict:
         'payment_hash': inv['payment_hash'],
         'amount_sats': double_sats,
         'amount_usd': bubble.balance_usd * 2,
+        'mock': inv.get('mock', False),
     }
 
 
@@ -111,7 +117,7 @@ def withdraw_bubble(user_id: int, bubble_id: int, payment_request: str) -> dict:
     if bubble.balance_sats <= 0:
         return {'error': 'Bubble is empty'}
 
-    result = pay_invoice(payment_request)
+    result = pay_invoice(user_id, payment_request)
     if result.get('error'):
         return result
 
@@ -135,6 +141,7 @@ def withdraw_bubble(user_id: int, bubble_id: int, payment_request: str) -> dict:
         'bubble_id': bubble.id,
         'sats_sent': sats_sent,
         'usd_sent': usd_sent,
+        'mock': result.get('mock', False),
     }
 
 
