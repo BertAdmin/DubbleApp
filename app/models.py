@@ -25,6 +25,8 @@ class Wallet(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), unique=True, nullable=False)
     storage_dir = db.Column(db.String(256), nullable=True)
+    mnemonic_encrypted = db.Column(db.Text, nullable=True)
+    encryption_salt = db.Column(db.String(32), nullable=True)
     balance_sats = db.Column(db.Integer, default=0)
     balance_usd = db.Column(db.Float, default=0.0)
     last_synced_at = db.Column(db.DateTime)

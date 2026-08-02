@@ -46,7 +46,7 @@ def api_double():
 @bubble_bp.route('/api/confirm/<payment_hash>', methods=['POST'])
 @login_required
 def api_confirm(payment_hash):
-    result = confirm_payment(payment_hash)
+    result = confirm_payment(current_user.id, payment_hash)
     if 'error' in result:
         return jsonify(result), 400
     return jsonify(result)

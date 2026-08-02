@@ -1,94 +1,78 @@
-import os
 import asyncio
 import hashlib
 import logging
-import threading
+import os
+import time
+
 from flask import current_app
 
 logger = logging.getLogger(__name__)
 
-_server_salt = b'dubble-kdf-salt-v1'
-_sdk_instances = {}
-_lock = threading.Lock()
-_loop = None
-_loop_thread = None
+_mnemonics: dict[int, tuple[str, float]] = {}
+MNEMONIC_TTL_SECS = 3600
 
 
-def _get_event_loop():
-    global _loop, _loop_thread
-    if _loop is not None and _loop.is_running():
-        return _loop
-    _loop = asyncio.new_event_loop()
-    _loop_thread = threading.Thread(target=_loop.run_forever, daemon=True)
-    _loop_thread.start()
-    return _loop
+def cache_mnemonic(user_id: int, mnemonic: str):
+    _mnemonics[user_id] = (mnemonic, time.time())
+
+
+def get_cached_mnemonic(user_id: int) -> str | None:
+    entry = _mnemonics.get(user_id)
+    if not entry:
+        return None
+    mnemonic, cached_at = entry
+    if time.time() - cached_at > MNEMONIC_TTL_SECS:
+        _mnemonics.pop(user_id, None)
+        return None
+    return mnemonic
+
+
+def drop_mnemonic(user_id: int):
+    _mnemonics.pop(user_id, None)
 
 
 def _run(coro):
-    loop = _get_event_loop()
-    future = asyncio.run_coroutine_threadsafe(coro, loop)
-    return future.result(timeout=30)
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
-def derive_mnemonic(username: str, password: str) -> str:
-    from mnemonic import Mnemonic
-    entropy = hashlib.pbkdf2_hmac(
-        'sha256',
-        password.encode('utf-8'),
-        (username + ':dubble').encode('utf-8') + _server_salt,
-        100_000,
-        dklen=16,
-    )
-    mnemo = Mnemonic('english')
-    return mnemo.to_mnemonic(entropy)
+def _storage_dir(user_id: int) -> str:
+    from app.models import Wallet
+    wallet = Wallet.query.filter_by(user_id=user_id).first()
+    if wallet and wallet.storage_dir:
+        return wallet.storage_dir
+    return f'data/wallets/{user_id}'
 
 
-def _connect_sdk(mnemonic: str, storage_dir: str):
+async def _build_sdk(user_id: int):
     from breez_sdk_spark import (
-        ConnectRequest,
         Network,
+        SdkBuilder,
         Seed,
-        default_config,
-        connect,
+        SyncWalletRequest,
+        default_server_config,
     )
 
-    config = default_config(Network.MAINNET)
+    mnemonic = get_cached_mnemonic(user_id)
+    if not mnemonic:
+        return None
+
+    config = default_server_config(Network.MAINNET)
     config.api_key = current_app.config.get('BREEZ_API_KEY', '')
 
     seed = Seed.MNEMONIC(mnemonic=mnemonic, passphrase=None)
+    storage_dir = _storage_dir(user_id)
     os.makedirs(storage_dir, exist_ok=True)
 
-    request = ConnectRequest(config=config, seed=seed, storage_dir=storage_dir)
-    return _run(connect(request))
-
-
-def get_sdk(user_id: int, mnemonic: str = None, storage_dir: str = None):
-    with _lock:
-        if user_id in _sdk_instances:
-            return _sdk_instances[user_id]
-
-    if mnemonic is None or storage_dir is None:
-        return None
-
-    try:
-        sdk = _connect_sdk(mnemonic, storage_dir)
-    except Exception as e:
-        logger.error('SDK connect failed for user %s: %s', user_id, e)
-        return None
-
-    with _lock:
-        _sdk_instances[user_id] = sdk
+    builder = SdkBuilder(config=config, seed=seed)
+    await builder.with_default_storage(storage_dir=storage_dir)
+    sdk = await builder.build()
+    await sdk.sync_wallet(request=SyncWalletRequest())
     return sdk
-
-
-def disconnect_user(user_id: int):
-    with _lock:
-        sdk = _sdk_instances.pop(user_id, None)
-    if sdk:
-        try:
-            _run(sdk.disconnect())
-        except Exception:
-            pass
 
 
 def _mock_invoice(amount_sats: int, memo: str = '') -> dict:
@@ -102,109 +86,162 @@ def _mock_invoice(amount_sats: int, memo: str = '') -> dict:
 
 
 def generate_invoice(user_id: int, amount_sats: int, memo: str = '') -> dict:
-    sdk = get_sdk(user_id)
-    if sdk is None:
+    if get_cached_mnemonic(user_id) is None:
         return _mock_invoice(amount_sats, memo)
 
-    from breez_sdk_spark import ReceivePaymentRequest, ReceivePaymentMethod
+    async def op():
+        sdk = await _build_sdk(user_id)
+        if sdk is None:
+            return _mock_invoice(amount_sats, memo)
 
-    try:
-        response = _run(sdk.receive_payment(
-            request=ReceivePaymentRequest(
-                payment_method=ReceivePaymentMethod.BOLT11_INVOICE(
-                    description=memo or f'Dubble: {amount_sats} sats',
-                    amount_sats=amount_sats,
-                    expiry_secs=300,
-                    payment_hash=None,
+        from breez_sdk_spark import ReceivePaymentMethod, ReceivePaymentRequest
+
+        try:
+            response = await sdk.receive_payment(
+                request=ReceivePaymentRequest(
+                    payment_method=ReceivePaymentMethod.BOLT11_INVOICE(
+                        description=memo or f'Dubble: {amount_sats} sats',
+                        amount_sats=amount_sats,
+                        expiry_secs=300,
+                        payment_hash=None,
+                    )
                 )
             )
-        ))
 
-        payment_request = response.payment_request
-        payment_hash = hashlib.sha256(payment_request.encode()).hexdigest()
+            payment_request = response.payment_request
+            payment_hash = hashlib.sha256(payment_request.encode()).hexdigest()
 
-        return {
-            'mock': False,
-            'payment_hash': payment_hash,
-            'payment_request': payment_request,
-            'amount_sats': amount_sats,
-        }
-    except Exception as e:
-        logger.error('generate_invoice failed for user %s: %s', user_id, e)
-        return {'error': str(e)}
+            return {
+                'mock': False,
+                'payment_hash': payment_hash,
+                'payment_request': payment_request,
+                'amount_sats': amount_sats,
+            }
+        except Exception as e:
+            logger.error('generate_invoice failed for user %s: %s', user_id, e)
+            return {'error': str(e)}
+        finally:
+            try:
+                await sdk.disconnect()
+            except Exception:
+                pass
+
+    return _run(op())
 
 
 def check_received_payment(user_id: int, payment_request: str) -> dict:
-    sdk = get_sdk(user_id)
-    if sdk is None:
+    if get_cached_mnemonic(user_id) is None:
         return {'mock': True, 'paid': True}
 
-    from breez_sdk_spark import ListPaymentsRequest
+    async def op():
+        sdk = await _build_sdk(user_id)
+        if sdk is None:
+            return {'mock': True, 'paid': True}
 
-    try:
-        response = _run(sdk.list_payments(
-            request=ListPaymentsRequest()
-        ))
-        for payment in response.payments:
-            if hasattr(payment, 'payment_request') and payment.payment_request == payment_request:
-                return {'mock': False, 'paid': True, 'payment': payment}
-        return {'mock': False, 'paid': False}
-    except Exception as e:
-        logger.error('check_received_payment failed for user %s: %s', user_id, e)
-        return {'error': str(e)}
+        from breez_sdk_spark import ListPaymentsRequest
+
+        try:
+            response = await sdk.list_payments(request=ListPaymentsRequest())
+            for payment in response.payments:
+                if hasattr(payment, 'payment_request') and payment.payment_request == payment_request:
+                    return {'mock': False, 'paid': True, 'payment': payment}
+            return {'mock': False, 'paid': False}
+        except Exception as e:
+            logger.error('check_received_payment failed for user %s: %s', user_id, e)
+            return {'error': str(e)}
+        finally:
+            try:
+                await sdk.disconnect()
+            except Exception:
+                pass
+
+    return _run(op())
 
 
 def pay_invoice(user_id: int, payment_request: str) -> dict:
-    sdk = get_sdk(user_id)
-    if sdk is None:
+    if get_cached_mnemonic(user_id) is None:
         return {'mock': True, 'success': True}
 
-    from breez_sdk_spark import PrepareSendPaymentRequest, SendPaymentRequest
+    async def op():
+        sdk = await _build_sdk(user_id)
+        if sdk is None:
+            return {'mock': True, 'success': True}
 
-    try:
-        prepare = _run(sdk.prepare_send_payment(
-            request=PrepareSendPaymentRequest(
-                payment_request=payment_request,
-                amount=None,
+        from breez_sdk_spark import PrepareSendPaymentRequest, SendPaymentRequest
+
+        try:
+            prepare = await sdk.prepare_send_payment(
+                request=PrepareSendPaymentRequest(
+                    payment_request=payment_request,
+                    amount=None,
+                )
             )
-        ))
-        response = _run(sdk.send_payment(
-            request=SendPaymentRequest(prepare_response=prepare)
-        ))
-        return {'mock': False, 'success': True, 'payment': response}
-    except Exception as e:
-        logger.error('pay_invoice failed for user %s: %s', user_id, e)
-        return {'error': str(e)}
+            response = await sdk.send_payment(
+                request=SendPaymentRequest(prepare_response=prepare)
+            )
+            return {'mock': False, 'success': True, 'payment': response}
+        except Exception as e:
+            logger.error('pay_invoice failed for user %s: %s', user_id, e)
+            return {'error': str(e)}
+        finally:
+            try:
+                await sdk.disconnect()
+            except Exception:
+                pass
+
+    return _run(op())
 
 
 def get_balance(user_id: int) -> dict:
-    sdk = get_sdk(user_id)
-    if sdk is None:
+    if get_cached_mnemonic(user_id) is None:
         return {'mock': True, 'balance_sats': 0}
 
-    from breez_sdk_spark import GetInfoRequest
+    async def op():
+        sdk = await _build_sdk(user_id)
+        if sdk is None:
+            return {'mock': True, 'balance_sats': 0}
 
-    try:
-        info = _run(sdk.get_info(request=GetInfoRequest(ensure_synced=False)))
-        return {
-            'mock': False,
-            'balance_sats': info.balance_sats,
-        }
-    except Exception as e:
-        logger.error('get_balance failed for user %s: %s', user_id, e)
-        return {'error': str(e)}
+        from breez_sdk_spark import GetInfoRequest
+
+        try:
+            info = await sdk.get_info(request=GetInfoRequest(ensure_synced=False))
+            return {
+                'mock': False,
+                'balance_sats': info.balance_sats,
+            }
+        except Exception as e:
+            logger.error('get_balance failed for user %s: %s', user_id, e)
+            return {'error': str(e)}
+        finally:
+            try:
+                await sdk.disconnect()
+            except Exception:
+                pass
+
+    return _run(op())
 
 
 def list_payments(user_id: int) -> dict:
-    sdk = get_sdk(user_id)
-    if sdk is None:
+    if get_cached_mnemonic(user_id) is None:
         return {'mock': True, 'payments': []}
 
-    from breez_sdk_spark import ListPaymentsRequest
+    async def op():
+        sdk = await _build_sdk(user_id)
+        if sdk is None:
+            return {'mock': True, 'payments': []}
 
-    try:
-        response = _run(sdk.list_payments(request=ListPaymentsRequest()))
-        return {'mock': False, 'payments': response.payments}
-    except Exception as e:
-        logger.error('list_payments failed for user %s: %s', user_id, e)
-        return {'error': str(e)}
+        from breez_sdk_spark import ListPaymentsRequest
+
+        try:
+            response = await sdk.list_payments(request=ListPaymentsRequest())
+            return {'mock': False, 'payments': response.payments}
+        except Exception as e:
+            logger.error('list_payments failed for user %s: %s', user_id, e)
+            return {'error': str(e)}
+        finally:
+            try:
+                await sdk.disconnect()
+            except Exception:
+                pass
+
+    return _run(op())

@@ -87,6 +87,37 @@ body {
 }
 .auth-link a { color: #7c3aed; text-decoration: none; }
 
+/* Mnemonic backup page */
+.mnemonic-box {
+    background: #111;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 16px;
+    font-family: monospace;
+    font-size: 14px;
+    line-height: 1.7;
+    word-break: break-word;
+    margin-bottom: 14px;
+    color: #4ade80;
+}
+.mnemonic-warning {
+    font-size: 13px;
+    color: #aaa;
+    margin-bottom: 16px;
+}
+.mnemonic-warning strong { color: #f87171; }
+.ack-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #ccc;
+    margin-bottom: 16px;
+    text-align: left;
+}
+.ack-label input { accent-color: #7c3aed; }
+#ack-btn:disabled { background: #333; color: #666; cursor: not-allowed; }
+
 /* App header */
 .app { min-height: 100vh; }
 .menu {
