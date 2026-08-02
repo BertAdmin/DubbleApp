@@ -78,9 +78,9 @@ def double_bubble(user_id: int, bubble_id: int) -> dict:
     }
 
 
-def confirm_payment(payment_hash: str) -> dict:
+def confirm_payment(user_id: int, payment_hash: str) -> dict:
     invoice = Invoice.query.filter_by(payment_hash=payment_hash).first()
-    if not invoice:
+    if not invoice or invoice.bubble.user_id != user_id:
         return {'error': 'Invoice not found'}
     if invoice.status == 'paid':
         return {'error': 'Already paid'}
@@ -200,7 +200,7 @@ def check_pending_invoices(user_id: int) -> list[dict]:
 
     confirmed = []
     for inv in pending:
-        result = confirm_payment(inv.payment_hash)
+        result = confirm_payment(user_id, inv.payment_hash)
         if 'error' not in result:
             confirmed.append(result)
 

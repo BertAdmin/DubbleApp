@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Backup your seed — Dubble{% endblock %}
+{% block content %}
+<div class="auth-container">
+    <h1>Write this down</h1>
+    <p class="subtitle">your wallet recovery phrase</p>
+    <div class="mnemonic-box">{{ mnemonic }}</div>
+    <p class="mnemonic-warning">
+        Write these words down and store them securely. This is the only way to
+        recover your wallet if you lose your password. <strong>Dubble will never
+        show this again.</strong>
+    </p>
+    <form method="POST" action="{{ url_for('auth.register_acknowledge') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label class="ack-label">
+            <input type="checkbox" id="ack" required>
+            I have written down my recovery phrase
+        </label>
+        <button type="submit" id="ack-btn" disabled>Continue to Login</button>
+    </form>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+    document.getElementById('ack').addEventListener('change', (e) => {
+        document.getElementById('ack-btn').disabled = !e.target.checked;
+    });
+</script>
+{% endblock %}

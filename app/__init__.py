@@ -4,6 +4,7 @@ from flask_login import LoginManager
 from flask_wtf.csrf import CSRFProtect
 from app.config import Config
 from app.models import db, User
+from app.auth import LoginUser
 
 login_manager = LoginManager()
 csrf = CSRFProtect()
@@ -24,7 +25,10 @@ def create_app(config_class=Config):
 
     @login_manager.user_loader
     def load_user(user_id):
-        return db.session.get(User, int(user_id))
+        user = db.session.get(User, int(user_id))
+        if user is None:
+            return None
+        return LoginUser(user)
 
     from app.routes.auth_routes import auth_bp
     from app.routes.bubble_routes import bubble_bp
