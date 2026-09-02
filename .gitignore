@@ -1,0 +1,9 @@
+venv/
+instance/
+.env
+__pycache__/
+.pytest_cache/
+*.pyc
+*.db
+.breez_data/
+data/wallets/
