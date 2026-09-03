@@ -97,3 +97,56 @@ def test_pop_only_when_empty(client, monkeypatch):
     resp = api(client, f"/api/bubble/{blow['bubble_id']}", 'DELETE')
     assert resp.status_code == 200
     assert api(client, '/api/bubbles').get_json() == []
+
+
+def test_confirm_waits_for_sdk_receipt(client, monkeypatch):
+    monkeypatch.setattr('app.lightning.get_cached_mnemonic', lambda user_id: None)
+    _register_and_login(client, 'alice')
+
+    blow = api(client, '/api/blow', 'POST').get_json()
+
+    monkeypatch.setattr(
+        'app.lightning.check_received_payment',
+        lambda user_id, payment_request: {'mock': True, 'paid': False},
+    )
+
+    resp = api(client, f"/api/confirm/{blow['payment_hash']}", 'POST')
+    assert resp.status_code == 400
+    assert resp.get_json()['error'] == 'Payment not yet received'
+
+    resp = api(client, '/api/bubbles')
+    assert resp.get_json()[0]['balance_sats'] == 0
+
+
+def test_confirm_credits_on_sdk_receipt(client, monkeypatch):
+    monkeypatch.setattr('app.lightning.get_cached_mnemonic', lambda user_id: None)
+    _register_and_login(client, 'alice')
+
+    blow = api(client, '/api/blow', 'POST').get_json()
+
+    monkeypatch.setattr(
+        'app.lightning.check_received_payment',
+        lambda user_id, payment_request: {'mock': True, 'paid': True},
+    )
+
+    resp = api(client, f"/api/confirm/{blow['payment_hash']}", 'POST')
+    assert resp.status_code == 200
+
+    resp = api(client, '/api/bubbles')
+    assert resp.get_json()[0]['balance_sats'] == 10
+
+
+def test_confirm_surfaces_sdk_error(client, monkeypatch):
+    monkeypatch.setattr('app.lightning.get_cached_mnemonic', lambda user_id: None)
+    _register_and_login(client, 'alice')
+
+    blow = api(client, '/api/blow', 'POST').get_json()
+
+    monkeypatch.setattr(
+        'app.lightning.check_received_payment',
+        lambda user_id, payment_request: {'error': 'Breez is down'},
+    )
+
+    resp = api(client, f"/api/confirm/{blow['payment_hash']}", 'POST')
+    assert resp.status_code == 400
+    assert resp.get_json()['error'] == 'Breez is down'

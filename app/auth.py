@@ -99,3 +99,30 @@ def authenticate_user(username: str, password: str) -> User | None:
     if user and check_password(password, user.password_hash):
         return user
     return None
+
+
+def change_password(user, old_password: str, new_password: str) -> tuple[bool, str]:
+    if len(new_password) < 6:
+        return False, 'New password must be at least 6 characters'
+
+    if not check_password(old_password, user.password_hash):
+        return False, 'Current password is incorrect'
+
+    wallet = user.wallet
+    if not wallet or not wallet.mnemonic_encrypted or not wallet.encryption_salt:
+        return False, 'This account has no wallet seed — cannot change password'
+
+    try:
+        mnemonic = decrypt_mnemonic(
+            wallet.mnemonic_encrypted, wallet.encryption_salt, old_password
+        )
+    except Exception:
+        return False, 'Current password could not unlock your wallet'
+
+    encrypted, salt = encrypt_mnemonic(mnemonic, new_password)
+    wallet.mnemonic_encrypted = encrypted
+    wallet.encryption_salt = salt.hex()
+    user.password_hash = hash_password(new_password)
+    db.session.commit()
+
+    return True, 'Password changed'
