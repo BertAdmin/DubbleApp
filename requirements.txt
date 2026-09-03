@@ -8,4 +8,5 @@ requests>=2.32
 breez-sdk-spark>=0.15
 mnemonic>=0.21
 cryptography>=42
+flask-session>=0.5
 pytest>=8

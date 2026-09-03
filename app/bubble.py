@@ -85,6 +85,13 @@ def confirm_payment(user_id: int, payment_hash: str) -> dict:
     if invoice.status == 'paid':
         return {'error': 'Already paid'}
 
+    from app.lightning import check_received_payment
+    verified = check_received_payment(user_id, invoice.payment_request)
+    if verified.get('error'):
+        return {'error': verified['error']}
+    if not verified.get('paid'):
+        return {'error': 'Payment not yet received'}
+
     invoice.status = 'paid'
     invoice.paid_at = datetime.now(timezone.utc)
 

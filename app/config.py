@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from cachelib import FileSystemCache
 
 load_dotenv()
 
@@ -12,3 +13,10 @@ class Config:
     BREEZ_NETWORK = os.environ.get('BREEZ_NETWORK', 'mainnet')
     WTF_CSRF_ENABLED = True
     SATS_PER_BTC = 100_000_000
+    SESSION_TYPE = 'cachelib'
+    SESSION_CACHELIB = FileSystemCache(
+        threshold=500,
+        default_timeout=3600,
+        cache_dir=os.environ.get('SESSION_FILE_DIR', 'instance/sessions'),
+    )
+    SESSION_PERMANENT = False

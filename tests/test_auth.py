@@ -1,7 +1,7 @@
 import re
 
 from app.models import User, Wallet
-from tests.conftest import api, login, register
+from tests.conftest import api, csrf_token, login, register
 
 
 def test_register_creates_encrypted_wallet(client, app):
@@ -62,3 +62,82 @@ def test_logout_clears_session(client):
     client.get('/logout')
     resp = client.get('/')
     assert resp.status_code == 302
+
+
+def test_mnemonic_not_in_client_cookie(client, app):
+    register(client, 'alice', 'secret123')
+    token = csrf_token(client, '/login')
+    resp = client.post(
+        '/login',
+        data={'csrf_token': token, 'username': 'alice', 'password': 'secret123'},
+    )
+    assert resp.status_code == 302
+
+    cookie_header = resp.headers.get('Set-Cookie', '')
+    assert 'alice' not in cookie_header
+    with app.app_context():
+        wallet = Wallet.query.filter_by(user_id=User.query.filter_by(username='alice').first().id).first()
+        assert wallet and wallet.mnemonic_encrypted
+        assert wallet.mnemonic_encrypted not in cookie_header
+
+
+def _change_password(client, old, new, confirm):
+    token = csrf_token(client, '/change-password')
+    assert token, 'no csrf token on change-password page'
+    return client.post(
+        '/change-password',
+        data={
+            'csrf_token': token,
+            'old_password': old,
+            'new_password': new,
+            'confirm_password': confirm,
+        },
+    )
+
+
+def test_change_password_success_rekeys_wallet(client, app):
+    register(client, 'alice', 'secret123')
+    login(client, 'alice', 'secret123')
+    with app.app_context():
+        old_hash = User.query.filter_by(username='alice').first().password_hash
+
+    resp = _change_password(client, 'secret123', 'newpass456', 'newpass456')
+    assert resp.status_code == 302
+
+    with app.app_context():
+        user = User.query.filter_by(username='alice').first()
+        wallet = Wallet.query.filter_by(user_id=user.id).first()
+        assert user.password_hash != old_hash
+        assert wallet.mnemonic_encrypted
+        from app.auth import decrypt_mnemonic
+        mnemonic = decrypt_mnemonic(wallet.mnemonic_encrypted, wallet.encryption_salt, 'newpass456')
+        assert len(mnemonic.split()) == 24
+
+
+def test_change_password_old_password_fails_after_change(client):
+    register(client, 'alice', 'secret123')
+    login(client, 'alice', 'secret123')
+    _change_password(client, 'secret123', 'newpass456', 'newpass456')
+
+    client.get('/logout')
+    resp = login(client, 'alice', 'secret123')
+    assert resp.status_code == 200
+    assert client.get('/').status_code == 302
+
+    resp = login(client, 'alice', 'newpass456')
+    assert resp.status_code == 302
+
+
+def test_change_password_wrong_current_rejected(client):
+    register(client, 'alice', 'secret123')
+    login(client, 'alice', 'secret123')
+    resp = _change_password(client, 'wrongpass', 'newpass456', 'newpass456')
+    assert resp.status_code == 200
+
+
+def test_change_password_mismatch_confirmation(client):
+    register(client, 'alice', 'secret123')
+    login(client, 'alice', 'secret123')
+    resp = _change_password(client, 'secret123', 'newpass456', 'different789')
+    assert resp.status_code == 200
+    assert login(client, 'alice', 'secret123').status_code == 302

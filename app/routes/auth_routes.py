@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, redirect, url_for, flash, request
 from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.urls import urlsplit
-from app.auth import register_user, authenticate_user, LoginUser, decrypt_mnemonic
+from app.auth import register_user, authenticate_user, LoginUser, decrypt_mnemonic, change_password
 from app.lightning import cache_mnemonic, drop_mnemonic
 
 auth_bp = Blueprint('auth', __name__)
@@ -62,3 +62,24 @@ def logout():
     drop_mnemonic(current_user.id)
     logout_user()
     return redirect(url_for('auth.login'))
+
+
+@auth_bp.route('/change-password', methods=['GET', 'POST'])
+@login_required
+def change_password_page():
+    if request.method == 'POST':
+        old_password = request.form.get('old_password', '')
+        new_password = request.form.get('new_password', '')
+        confirm = request.form.get('confirm_password', '')
+        if new_password != confirm:
+            flash('New passwords do not match', 'error')
+            return render_template('change_password.html')
+        success, message = change_password(
+            current_user._user, old_password, new_password
+        )
+        if success:
+            drop_mnemonic(current_user.id)
+            flash('Password changed. Please log in again.', 'success')
+            return redirect(url_for('auth.login'))
+        flash(message, 'error')
+    return render_template('change_password.html')
