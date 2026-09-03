@@ -2,12 +2,14 @@ import os
 from flask import Flask
 from flask_login import LoginManager
 from flask_wtf.csrf import CSRFProtect
+from flask_session import Session
 from app.config import Config
 from app.models import db, User
 from app.auth import LoginUser
 
 login_manager = LoginManager()
 csrf = CSRFProtect()
+server_session = Session()
 
 
 def create_app(config_class=Config):
@@ -21,6 +23,7 @@ def create_app(config_class=Config):
     login_manager.init_app(app)
     login_manager.login_view = 'auth.login'
     login_manager.login_message_category = 'info'
+    server_session.init_app(app)
     csrf.init_app(app)
 
     @login_manager.user_loader

@@ -4,31 +4,34 @@ import logging
 import os
 import time
 
-from flask import current_app
+from flask import current_app, session
 
 logger = logging.getLogger(__name__)
 
-_mnemonics: dict[int, tuple[str, float]] = {}
 MNEMONIC_TTL_SECS = 3600
+_SESSION_KEY = '_dubble_mnemonic'
+_SESSION_AT = '_dubble_mnemonic_at'
 
 
 def cache_mnemonic(user_id: int, mnemonic: str):
-    _mnemonics[user_id] = (mnemonic, time.time())
+    session[_SESSION_KEY] = mnemonic
+    session[_SESSION_AT] = time.time()
 
 
 def get_cached_mnemonic(user_id: int) -> str | None:
-    entry = _mnemonics.get(user_id)
-    if not entry:
+    mnemonic = session.get(_SESSION_KEY)
+    cached_at = session.get(_SESSION_AT)
+    if not mnemonic or not cached_at:
         return None
-    mnemonic, cached_at = entry
     if time.time() - cached_at > MNEMONIC_TTL_SECS:
-        _mnemonics.pop(user_id, None)
+        drop_mnemonic(user_id)
         return None
     return mnemonic
 
 
 def drop_mnemonic(user_id: int):
-    _mnemonics.pop(user_id, None)
+    session.pop(_SESSION_KEY, None)
+    session.pop(_SESSION_AT, None)
 
 
 def _run(coro):

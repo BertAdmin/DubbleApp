@@ -144,9 +144,65 @@ If things break:
 
 ---
 
-## Sprint 3 Candidates (deferred)
+## Sprint 3: Close the Security Gaps
 
-- A5: `/change-password` (decrypt → re-encrypt with new password)
-- Real payment verification in `confirm_payment` using `check_received_payment()` (already rewritten for server mode)
-- Server-side sessions for the mnemonic cache (remove TTL in-memory dict)
-- Alembic migrations, PostgreSQL, production hardening
+**Goal:** Close the three security gaps deferred from Sprint 2. No MCP wrapper — that stays parked.
+
+**Started:** 2026-09-01
+**Status:** Shipped
+
+### Task 1 — Real payment verification in `confirm_payment`
+
+**Problem:** `confirm_payment` trusted the client POST — any logged-in user could flip any *own* invoice to paid without actually paying, crediting a bubble for nothing. The P1 ownership check from Sprint 2 stopped cross-user abuse, but the verify-vs-pay gap remained.
+
+**Fix:**
+- `app/bubble.py:confirm_payment` now calls `check_received_payment(user_id, invoice.payment_request)` against the Breez SDK **before** flipping `status='paid'`.
+- If the SDK reports no matching payment → returns `400 'Payment not yet received'`, invoice stays `pending`.
+- If the SDK errors (node down etc.) → surfaced as `400` with the SDK error; balance untouched.
+- Only on confirmed receipt does the bubble get credited.
+
+**Tests:** mock-mode `check_received_payment` returns `paid: True` (matches existing behavior), so the happy path is unchanged. New hermetic tests cover the not-yet-paid, on-receipt-credit, and SDK-error branches.
+
+### Task 2 — Server-side sessions for the mnemonic cache
+
+**Problem:** The decrypted mnemonic lived in a module-level `dict[int, tuple]` keyed by user_id — shared server-side, but lost on restart and tracked only by an opaque TTL. Not tied to the user's session.
+
+**Fix:**
+- Replaced `_mnemonics` dict with the **server-side session** via `flask-session` (CacheLib `FileSystemCache`, dir `instance/sessions/`, 1h timeout).
+- `cache_mnemonic` / `get_cached_mnemonic` / `drop_mnemonic` now read/write `flask.session` (`_dubble_mnemonic`, `_dubble_mnemonic_at`).
+- The mnemonic **never appears in the client cookie** — verified by a test asserting the encrypted seed isn't in `Set-Cookie`.
+- Logout still calls `drop_mnemonic`, clearing the session.
+- Accepted tradeoff (September scope): filesystem sessions are per-process; a server restart with cleared `instance/` forces re-login. Production hardening (Redis/Postgres sessions) is Sprint 4.
+
+**Files:** `requirements.txt` (+`flask-session`), `app/config.py` (CacheLib session config), `app/__init__.py` (init `Session()`), `app/lightning.py`.
+
+### Task 3 — Change-password endpoint
+
+**Problem:** No way to change a password. Since the wallet mnemonic is encrypted with a password-derived key, a naive password change would strand the wallet under the old key.
+
+**Fix:**
+- `app/auth.py:change_password(user, old, new)` — verifies the old password **and** that it decrypts the mnemonic, then re-encrypts the mnemonic with the new password and updates the bcrypt hash in a single `db.session.commit()` (atomic rekey).
+- `GET/POST /change-password` (`app/routes/auth_routes.py`), `@login_required`. On success clears the mnemonic session and forces re-login.
+- `app/templates/change_password.html` + a link in the index header menu.
+
+**Atomicity:** decryption happens *before* any write; mnemonic + hash update in one commit, so a partial failure can't leave a wallet the new password can't unlock.
+
+**Tests:**
+- Success rekeys the wallet (old hash changes, new password decrypts a valid 24-word mnemonic).
+- Old password fails to log in after the change; new password works.
+- Wrong current password rejected (stays on page, 200).
+- Mismatched confirmation rejected.
+- Mnemonic not present in the client cookie.
+
+### Verification
+
+- `pytest`: **25 passed** (17 Sprint-2 + 8 new).
+- Automated suite is **money-free** — all payment logic runs in mock mode. The real `check_received_payment` against a funded mainnet wallet is a **manual walkthrough** on the prefunded node.
+
+### Sprint 4 Candidates (deferred, not dropped)
+
+- Alembic migrations + PostgreSQL
+- Redis/Postgres-backed sessions (production hardening)
+- **MCP server wrapper** (balance, invoice, pay, wallet state — driven from `.md` spec) — parked by decision on 2026-09-01
+- Real-manual-payment continuous verification / CI integration
+
